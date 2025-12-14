@@ -13,14 +13,13 @@ import io
 import random
 
 # ==================== 1. CONFIGURATION DU PROJET ====================
-# Vérifiez scrupuleusement ces informations
-GITHUB_USER = "Marcialsohfos"       
-GITHUB_REPO = "urban_ai_plus"       
-GITHUB_BRANCH = "main"              
+GITHUB_USER = "Marcialsohfos"
+GITHUB_REPO = "urban_ai_plus"
+GITHUB_BRANCH = "main"
 
-# Construction de la racine URL
-#BASE_URL = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/{GITHUB_BRANCH}"
-BASE_URL = f"https://raw.githubusercontent.com/https://github.com/Marcialsohfos/urban_ai_plus/blob/main/data/uploads/indicateurs_urbains.xlsx
+# CORRECTION ICI : On construit l'URL racine proprement
+# Cette URL pointe vers le dossier racine du projet sur GitHub en mode "Raw"
+BASE_URL = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/{GITHUB_BRANCH}"
 
 # Mot de passe hashé (urbankit@1001a)
 MASTER_PASSWORD_HASH = hashlib.sha256("urbankit@1001a".encode()).hexdigest()
@@ -54,6 +53,7 @@ def check_password():
         return False
     return True
 
+# Coordonnées approximatives pour simulation si GPS manquant
 COMMUNE_COORDS = {
     'Yaounde 1': {'lat': 3.8850, 'lon': 11.5200}, 'Yaounde 2': {'lat': 3.8980, 'lon': 11.5000},
     'Yaounde 3': {'lat': 3.8400, 'lon': 11.5000}, 'Yaounde 4': {'lat': 3.8450, 'lon': 11.5500},
@@ -64,7 +64,7 @@ COMMUNE_COORDS = {
 }
 
 def add_simulated_gps(row):
-    """Ajoute des coordonnées GPS si elles manquent"""
+    """Ajoute des coordonnées GPS simulées si elles manquent"""
     commune = str(row.get('Nom de la Commune', '')).strip().title()
     base = COMMUNE_COORDS.get(commune, {'lat': 3.86, 'lon': 11.52})
     return pd.Series({
@@ -74,20 +74,18 @@ def add_simulated_gps(row):
 
 @st.cache_data(ttl=3600)
 def load_data():
-    """Télécharge l'Excel depuis GitHub avec gestion d'erreur intelligente"""
+    """Télécharge l'Excel depuis GitHub"""
     
-    # 1. Essai avec le dossier /data/
+    # On construit l'URL du fichier Excel ici
     url_v1 = f"{BASE_URL}/data/indicateurs_urbains.xlsx"
-    # 2. Essai à la racine (au cas où l'utilisateur n'a pas mis de dossier data)
-    url_v2 = f"{BASE_URL}/indicateurs_urbains.xlsx"
+    url_v2 = f"{BASE_URL}/indicateurs_urbains.xlsx" # Secours
 
     try:
-        # Tentative 1
+        # Essai 1 : Dans le dossier /data/
         response = requests.get(url_v1, timeout=10)
         
-        # Si échec (404), on tente le chemin racine
+        # Essai 2 : A la racine (si 404)
         if response.status_code == 404:
-            # st.warning(f"Fichier non trouvé dans /data/, tentative à la racine...") # Décommenter pour debug
             response = requests.get(url_v2, timeout=10)
         
         response.raise_for_status()
@@ -97,6 +95,7 @@ def load_data():
         
         df.columns = df.columns.str.strip()
         
+        # Ajout GPS si nécessaire
         if 'latitude' not in df.columns:
             gps_data = df.apply(add_simulated_gps, axis=1)
             df = pd.concat([df, gps_data], axis=1)
@@ -104,10 +103,9 @@ def load_data():
         return df
         
     except Exception as e:
-        st.error(f"❌ ERREUR CRITIQUE DE CHARGEMENT")
-        st.write(f"Le système a tenté de lire : `{url_v1}`")
-        st.write(f"Erreur technique : {e}")
-        st.info("💡 CONSEIL : Vérifiez que votre dépôt GitHub est PUBLIC et que le fichier 'indicateurs_urbains.xlsx' existe bien.")
+        st.error(f"❌ ERREUR DE CHARGEMENT")
+        st.write(f"URL tentée : `{url_v1}`")
+        st.write(f"Détail : {e}")
         return pd.DataFrame()
 
 def get_img_url_github(filename, folder):
@@ -117,11 +115,8 @@ def get_img_url_github(filename, folder):
     
     clean_name = str(filename).strip().replace(" ", "%20")
     
-    # URL V1: Dans le dossier data/uploads
-    url = f"{BASE_URL}/data/uploads/{folder}/{clean_name}"
-    
-    # Vous pouvez ajouter ici une logique de vérification si nécessaire
-    return url
+    # Construction de l'URL image basée sur BASE_URL
+    return f"{BASE_URL}/data/uploads/{folder}/{clean_name}"
 
 # ==================== 3. APPLICATION PRINCIPALE ====================
 
@@ -137,7 +132,7 @@ def main():
             st.rerun()
 
     # --- CHARGEMENT ---
-    with st.spinner(f"Synchronisation avec {GITHUB_REPO}..."):
+    with st.spinner(f"Synchronisation avec GitHub..."):
         df = load_data()
 
     if df.empty:
@@ -167,7 +162,6 @@ def main():
         nb_nids = len(df_c[df_c['présence du nid de poule'].notna()])
         k4.metric("Zones Dégradées", nb_nids, delta_color="inverse")
         
-        # Correction warning: use_container_width au lieu de use_column_width
         st.dataframe(df_c, use_container_width=True)
 
     # --- TAB 2: IMAGES ---
@@ -180,7 +174,6 @@ def main():
             for _, row in df_c.iterrows():
                 url = get_img_url_github(row.get('image_troncon'), "troncons")
                 if url:
-                    # Correction warning
                     st.image(url, caption=row.get('tronçon de voirie'), use_container_width=True)
         
         with c2:
@@ -188,7 +181,6 @@ def main():
             for _, row in df_c.iterrows():
                 url = get_img_url_github(row.get('image_taudis'), "taudis")
                 if url:
-                    # Correction warning
                     st.image(url, caption=row.get('Nom de la poche du quartier de taudis'), use_container_width=True)
 
     # --- TAB 3: CARTE ---
