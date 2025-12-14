@@ -1,5 +1,5 @@
 """
-🏙️ URBAN AI - Version Finale Corrigée (Chemin Uploads)
+🏙️ URBAN AI - Version Finale Complète (Data + IA)
 Power by Lab_Math and CIE - Copyright © 2025
 """
 
@@ -11,48 +11,42 @@ from streamlit_folium import st_folium
 import hashlib
 import io
 import random
+import os
 
-# ==================== 1. CONFIGURATION DU PROJET ====================
+# ==================== 1. CONFIGURATION ====================
 GITHUB_USER = "Marcialsohfos"
 GITHUB_REPO = "urban_ai_plus"
 GITHUB_BRANCH = "main"
-
-# URL de base (Racine du dépôt en mode RAW)
 BASE_URL = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/{GITHUB_BRANCH}"
 
-# Mot de passe hashé (urbankit@1001a)
 MASTER_PASSWORD_HASH = hashlib.sha256("urbankit@1001a".encode()).hexdigest()
 
-st.set_page_config(
-    page_title="URBAN AI | Cameroun",
-    page_icon="🇨🇲",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+st.set_page_config(page_title="URBAN AI | Cameroun", page_icon="🇨🇲", layout="wide")
 
-# ==================== 2. FONCTIONS UTILITAIRES ====================
+# ==================== 2. IMPORTATION DU MODÈLE IA ====================
+# On utilise un try/except pour ne pas faire planter l'appli si le dossier models n'est pas encore poussé
+try:
+    from models.predictive_maintenance import MaintenancePredictor
+    HAS_AI = True
+except ImportError:
+    HAS_AI = False
 
+# ==================== 3. FONCTIONS UTILITAIRES ====================
 def check_password():
-    """Gère l'écran de connexion"""
-    if "authenticated" not in st.session_state:
-        st.session_state.authenticated = False
-
+    if "authenticated" not in st.session_state: st.session_state.authenticated = False
     if not st.session_state.authenticated:
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
             st.title("🔐 URBAN AI Access")
-            st.markdown("### Système de gestion des données urbaines")
             password = st.text_input("Mot de passe", type="password")
             if st.button("Se connecter", type="primary"):
                 if hashlib.sha256(password.encode()).hexdigest() == MASTER_PASSWORD_HASH:
                     st.session_state.authenticated = True
                     st.rerun()
-                else:
-                    st.error("Mot de passe incorrect")
+                else: st.error("Mot de passe incorrect")
         return False
     return True
 
-# Coordonnées pour simulation GPS
 COMMUNE_COORDS = {
     'Yaounde 1': {'lat': 3.8850, 'lon': 11.5200}, 'Yaounde 2': {'lat': 3.8980, 'lon': 11.5000},
     'Yaounde 3': {'lat': 3.8400, 'lon': 11.5000}, 'Yaounde 4': {'lat': 3.8450, 'lon': 11.5500},
@@ -72,63 +66,47 @@ def add_simulated_gps(row):
 
 @st.cache_data(ttl=3600)
 def load_data():
-    """Télécharge l'Excel depuis GitHub"""
-    
-    # --- CORRECTION DU CHEMIN ICI ---
-    # On pointe vers /data/uploads/indicateurs_urbains.xlsx
     url = f"{BASE_URL}/data/uploads/indicateurs_urbains.xlsx"
-
     try:
         response = requests.get(url, timeout=10)
-        response.raise_for_status() # Vérifie si 404
-        
+        response.raise_for_status()
         with io.BytesIO(response.content) as f:
             df = pd.read_excel(f)
-        
         df.columns = df.columns.str.strip()
-        
         if 'latitude' not in df.columns:
             gps_data = df.apply(add_simulated_gps, axis=1)
             df = pd.concat([df, gps_data], axis=1)
-            
         return df
-        
     except Exception as e:
-        st.error(f"❌ ERREUR DE CHARGEMENT")
-        st.write(f"URL tentée : `{url}`")
-        st.write(f"Détail : {e}")
+        st.error("Erreur connexion GitHub. Vérifiez que le repo est Public.")
         return pd.DataFrame()
 
 def get_img_url_github(filename, folder):
-    """Génère le lien direct vers l'image GitHub"""
-    if pd.isna(filename) or str(filename).strip() == "":
-        return None
-    
+    if pd.isna(filename) or str(filename).strip() == "": return None
     clean_name = str(filename).strip().replace(" ", "%20")
-    
-    # Les images sont aussi dans data/uploads/
     return f"{BASE_URL}/data/uploads/{folder}/{clean_name}"
 
-# ==================== 3. APPLICATION PRINCIPALE ====================
-
+# ==================== 4. APPLICATION PRINCIPALE ====================
 def main():
-    if not check_password():
-        return
+    if not check_password(): return
 
     with st.sidebar:
         st.title("🏙️ URBAN AI")
-        st.success("Statut : Connecté")
+        st.success("Mode : Connecté")
+        if HAS_AI:
+            st.info("🧠 Module IA : Actif")
+        else:
+            st.warning("🧠 Module IA : Non détecté (Vérifiez le dossier models/)")
+        
         if st.button("Déconnexion"):
             st.session_state.authenticated = False
             st.rerun()
 
-    with st.spinner(f"Chargement depuis {GITHUB_REPO}/data/uploads..."):
+    with st.spinner("Chargement des données..."):
         df = load_data()
+    if df.empty: st.stop()
 
-    if df.empty:
-        st.stop()
-
-    # --- FILTRES ---
+    # Filtres
     col1, col2 = st.columns(2)
     with col1:
         villes = sorted(df['Ville'].astype(str).unique())
@@ -140,58 +118,91 @@ def main():
     df_c = df[(df['Ville'] == ville_sel) & (df['Nom de la Commune'] == commune_sel)]
 
     # --- TABS ---
-    tab1, tab2, tab3 = st.tabs(["📊 Tableau de Bord", "📸 Galerie Images", "🗺️ Carte Interactive"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 Tableau de Bord", "📸 Images", "🗺️ Carte", "🧠 Analyse IA"])
 
-    # --- TAB 1: DASHBOARD ---
     with tab1:
-        st.header(f"Indicateurs : {commune_sel}")
+        st.header(f"KPIs : {commune_sel}")
         k1, k2, k3, k4 = st.columns(4)
         k1.metric("Tronçons", len(df_c))
-        k2.metric("Linéaire Total", f"{df_c['linéaire de voirie(ml)'].sum():,.0f} ml")
-        k3.metric("Surface Taudis", f"{df_c['superficie de la poche du quartier de taudis'].sum():,.0f} m²")
-        
+        k2.metric("Linéaire", f"{df_c['linéaire de voirie(ml)'].sum():,.0f} m")
         nb_nids = len(df_c[df_c['présence du nid de poule'].notna()])
-        k4.metric("Zones Dégradées", nb_nids, delta_color="inverse")
-        
+        k3.metric("Zones Dégradées", nb_nids, delta_color="inverse")
+        k4.metric("Taudis", f"{df_c['superficie de la poche du quartier de taudis'].sum():,.0f} m²")
         st.dataframe(df_c, use_container_width=True)
 
-    # --- TAB 2: IMAGES ---
     with tab2:
-        st.header("Inspection Visuelle")
+        st.header("Galerie")
         c1, c2 = st.columns(2)
-        
         with c1:
-            st.subheader("🛣️ Voirie")
+            st.subheader("Voirie")
             for _, row in df_c.iterrows():
                 url = get_img_url_github(row.get('image_troncon'), "troncons")
-                if url:
-                    st.image(url, caption=row.get('tronçon de voirie'), use_container_width=True)
-        
+                if url: st.image(url, caption=row.get('tronçon de voirie'), use_container_width=True)
         with c2:
-            st.subheader("🏘️ Taudis")
+            st.subheader("Taudis")
             for _, row in df_c.iterrows():
                 url = get_img_url_github(row.get('image_taudis'), "taudis")
-                if url:
-                    st.image(url, caption=row.get('Nom de la poche du quartier de taudis'), use_container_width=True)
+                if url: st.image(url, caption=row.get('Nom de la poche du quartier de taudis'), use_container_width=True)
 
-    # --- TAB 3: CARTE ---
     with tab3:
-        st.header("Cartographie des Risques")
+        st.header("Carte")
         if 'latitude' in df_c.columns:
             center = [df_c['latitude'].mean(), df_c['longitude'].mean()]
             m = folium.Map(location=center, zoom_start=13)
-            
             for _, row in df_c.iterrows():
                 color = 'red' if row.get('présence du nid de poule') == 'Oui' else 'green'
-                folium.Marker(
-                    [row['latitude'], row['longitude']],
-                    popup=f"{row.get('tronçon de voirie')}",
-                    icon=folium.Icon(color=color)
-                ).add_to(m)
-            
+                folium.Marker([row['latitude'], row['longitude']], popup=row.get('tronçon de voirie'), icon=folium.Icon(color=color)).add_to(m)
             st_folium(m, width=None, height=500)
+
+    # --- TAB 4 : INTELLIGENCE ARTIFICIELLE ---
+    with tab4:
+        st.header("🤖 Maintenance Prédictive & Recommandations")
+        
+        if not HAS_AI:
+            st.error("Le fichier 'models/predictive_maintenance.py' est introuvable sur GitHub.")
+            st.info("Veuillez pousser le dossier 'models' dans votre dépôt.")
         else:
-            st.warning("Coordonnées GPS indisponibles.")
+            # Instanciation du modèle
+            predictor = MaintenancePredictor()
+            
+            st.markdown("Ce module utilise l'IA pour prioriser les interventions en fonction de la dégradation, de l'éclairage et de l'importance de la voirie.")
+            
+            if st.button("🚀 Lancer l'analyse IA sur la commune"):
+                results = []
+                
+                # Barre de progression
+                progress_bar = st.progress(0)
+                
+                for i, (index, row) in enumerate(df_c.iterrows()):
+                    # Appel au modèle pour chaque ligne
+                    pred = predictor.predict_priority(row)
+                    
+                    results.append({
+                        "Tronçon": row.get('tronçon de voirie'),
+                        "Priorité": pred['label'],
+                        "Score Risque": pred['score'],
+                        "Action Recommandée": pred['action'],
+                        "État Actuel": "Dégradé" if row.get('présence du nid de poule') == 'Oui' else "Stable"
+                    })
+                    progress_bar.progress((i + 1) / len(df_c))
+                
+                # Création du tableau de résultats
+                res_df = pd.DataFrame(results)
+                
+                # Tri par score de risque (du plus urgent au moins urgent)
+                res_df = res_df.sort_values(by="Score Risque", ascending=False)
+                
+                # Affichage avec couleurs
+                def highlight_urgent(val):
+                    color = 'red' if 'URGENT' in str(val) else 'black'
+                    return f'color: {color}; font-weight: bold'
+
+                st.subheader("📋 Rapport de Priorisation")
+                st.dataframe(res_df.style.applymap(highlight_urgent, subset=['Priorité']), use_container_width=True)
+                
+                # Statistiques de l'analyse
+                n_urgent = len(res_df[res_df['Priorité'].str.contains('URGENT')])
+                st.warning(f"⚠️ {n_urgent} tronçons nécessitent une intervention immédiate dans cette commune.")
 
 if __name__ == "__main__":
     main()
