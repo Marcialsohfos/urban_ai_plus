@@ -9,4 +9,6 @@ seaborn
 folium
 streamlit-folium
 opencv-python-headless
+requests
 Pillow
+plotly

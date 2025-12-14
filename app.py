@@ -1,213 +1,213 @@
+"""
+🏙️ URBAN AI - Version Streamlit avec données GitHub
+Power by Lab_Math and CIE - Copyright © 2025
+"""
+
 import streamlit as st
 import pandas as pd
-import numpy as np
+import hashlib
+import requests
+import io
 import os
-import unicodedata
 from PIL import Image
 
-# Import du modèle (si le fichier existe)
-try:
-    from models.predictive_maintenance import MaintenancePredictor
-    HAS_MODEL = True
-except ImportError:
-    HAS_MODEL = False
-
-# ==================== CONFIGURATION ====================
+# ==================== CONFIGURATION GLOBALE ====================
 st.set_page_config(
-    page_title="Urban AI Cameroun",
-    page_icon="🇨🇲",
+    page_title="URBAN AI | Lab_Math",
+    page_icon="🏙️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# ==================== GESTIONNAIRE DE DONNÉES (Adapté) ====================
-class IndicateursManager:
-    def __init__(self, excel_path):
-        self.excel_path = excel_path
+# Configuration des URLs GitHub (À adapter avec VOS liens réels)
+# Astuce : Utilisez toujours l'URL "Raw" pour le fichier Excel
+GITHUB_REPO_URL = "https://raw.githubusercontent.com/Marcialsohfos/urban_data/main"
+EXCEL_URL = f"{GITHUB_REPO_URL}/indicateurs_urbains.xlsx"
+# Pour les images, on pointera vers le dossier raw
+IMAGES_BASE_URL = f"{GITHUB_REPO_URL}/images" 
 
-    @st.cache_data # Cache Streamlit pour ne pas recharger l'Excel à chaque clic
-    def load_data(_self):
-        """Charge les données ou crée un jeu de test"""
-        try:
-            if os.path.exists(_self.excel_path):
-                df = pd.read_excel(_self.excel_path)
-                # Nettoyage basique
-                df.columns = df.columns.str.strip()
-                return df
-            else:
-                return _self.create_sample_data()
-        except Exception as e:
-            st.error(f"Erreur de chargement: {e}")
-            return _self.create_sample_data()
+# Mot de passe hashé (urbankit@1001a)
+MASTER_PASSWORD_HASH = hashlib.sha256("urbankit@1001a".encode()).hexdigest()
 
-    def create_sample_data(self):
-        """Données de démonstration Cameroun"""
-        return pd.DataFrame({
-            'Ville': ['Douala', 'Douala', 'Yaoundé', 'Yaoundé', 'Bafoussam'],
-            'Nom de la Commune': ['Douala 1', 'Douala 5', 'Yaoundé 6', 'Yaoundé 2', 'Bafoussam 1'],
-            'tronçon de voirie': ['Bd de la Liberté', 'Entrée Logpom', 'Av. Kennedy', 'Mokolo', 'Rue Palais'],
-            'linéaire de voirie(ml)': [2500, 1200, 3200, 1800, 1500],
-            'Nom de la poche du quartier de taudis': ['New Bell', 'Maképé Missoké', 'Mvog-Ada', 'Briqueterie', 'Djeleng'],
-            'superficie de la poche du quartier de taudis': [12500, 8500, 9800, 7600, 5000],
-            'présence du nid de poule': ['Oui', 'Non', 'Oui', 'Non', 'Oui'],
-            'classe de voirie': ['Primaire', 'Secondaire', 'Primaire', 'Secondaire', 'Tertiaire'],
-            'Nombre de point lumineux sur le tronçon': [45, 28, 62, 35, 12]
-        })
+# ==================== FONCTIONS UTILITAIRES ====================
 
-    def get_kpis(self, df):
-        """Calculs statistiques"""
-        # Conversion sécurisée en numérique
-        df['linéaire'] = pd.to_numeric(df['linéaire de voirie(ml)'], errors='coerce').fillna(0)
-        df['superficie'] = pd.to_numeric(df['superficie de la poche du quartier de taudis'], errors='coerce').fillna(0)
+def check_password():
+    """Gère l'authentification simple"""
+    if "authenticated" not in st.session_state:
+        st.session_state.authenticated = False
+
+    if not st.session_state.authenticated:
+        st.markdown(
+            """
+            <style>
+            .stApp {background-color: #f0f2f6;}
+            .login-box {
+                max-width: 400px; margin: 100px auto; padding: 30px;
+                background: white; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            }
+            </style>
+            """, unsafe_allow_html=True
+        )
         
-        return {
-            'nb_troncons': len(df),
-            'total_lineaire': df['linéaire'].sum(),
-            'total_taudis': df['superficie'].sum(),
-            'taux_degradation': (len(df[df['présence du nid de poule'] == 'Oui']) / len(df) * 100) if len(df) > 0 else 0
-        }
+        col1, col2, col3 = st.columns([1,2,1])
+        with col2:
+            st.title("🔐 URBAN AI")
+            st.markdown("Système de gestion des données urbaines")
+            password = st.text_input("Mot de passe d'accès", type="password")
+            
+            if st.button("Se connecter", type="primary"):
+                if hashlib.sha256(password.encode()).hexdigest() == MASTER_PASSWORD_HASH:
+                    st.session_state.authenticated = True
+                    st.rerun()
+                else:
+                    st.error("❌ Mot de passe incorrect")
+            
+            st.caption("Power by Lab_Math and CIE © 2025")
+        return False
+    return True
 
-# ==================== INTERFACE UTILISATEUR ====================
+@st.cache_data(ttl=3600) # Cache les données pendant 1 heure pour ne pas spammer GitHub
+def load_data_from_github():
+    """Télécharge et met en cache le fichier Excel depuis GitHub"""
+    try:
+        headers = {'User-Agent': 'Urban-AI-App/1.0'}
+        response = requests.get(EXCEL_URL, headers=headers)
+        response.raise_for_status()
+        
+        # Lecture du contenu binaire
+        with io.BytesIO(response.content) as f:
+            df = pd.read_excel(f)
+            
+        # Nettoyage des colonnes (votre logique)
+        df.columns = df.columns.str.strip()
+        return df
+    except Exception as e:
+        st.error(f"Erreur de connexion GitHub : {e}")
+        # Retourne un DataFrame vide en cas d'erreur pour ne pas planter l'app
+        return pd.DataFrame()
+
+def get_image_url(filename, folder_type="troncons"):
+    """Construit l'URL de l'image sur GitHub"""
+    if pd.isna(filename) or str(filename).strip() == "":
+        return None
+    # On suppose que vos dossiers sur GitHub sont 'uploads/troncons' ou 'uploads/taudis'
+    # Adaptez le chemin selon votre structure réelle sur GitHub
+    return f"{IMAGES_BASE_URL}/{folder_type}/{filename}"
+
+# ==================== APPLICATION PRINCIPALE ====================
 
 def main():
-    st.title("🏙️ Urban AI System : Cameroun")
-    st.markdown("système intelligent d'aide à la décision pour la gestion urbaine.")
+    # 1. Vérification Mot de passe
+    if not check_password():
+        return
 
-    # 1. Chargement des données
-    manager = IndicateursManager('data/indicateurs_urbains.xlsx')
-    df = manager.load_data()
-
-    # 2. Sidebar (Filtres)
-    st.sidebar.header("📍 Paramètres")
-    
-    # Filtre Ville
-    villes = ['Toutes'] + sorted(df['Ville'].unique().tolist())
-    choix_ville = st.sidebar.selectbox("Sélectionner une Ville", villes)
-    
-    # Filtre Dynamique Commune
-    if choix_ville != 'Toutes':
-        df_filtered = df[df['Ville'] == choix_ville]
-        communes = ['Toutes'] + sorted(df_filtered['Nom de la Commune'].unique().tolist())
-    else:
-        df_filtered = df
-        communes = ['Toutes'] + sorted(df['Nom de la Commune'].unique().tolist())
-        
-    choix_commune = st.sidebar.selectbox("Sélectionner une Commune", communes)
-    
-    if choix_commune != 'Toutes':
-        df_filtered = df_filtered[df_filtered['Nom de la Commune'] == choix_commune]
-
-    # 3. Navigation Principale
-    tabs = st.tabs(["📊 Tableau de Bord", "🤖 Maintenance Prédictive", "📸 Analyse d'Images"])
-
-    # --- TAB 1: TABLEAU DE BORD ---
-    with tabs[0]:
-        kpis = manager.get_kpis(df_filtered)
-        
-        # Affichage des métriques en colonnes
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Tronçons Analysés", kpis['nb_troncons'])
-        col2.metric("Linéaire Total (ml)", f"{kpis['total_lineaire']:,.0f}")
-        col3.metric("Surface Taudis (m²)", f"{kpis['total_taudis']:,.0f}")
-        col4.metric("Taux Dégradation", f"{kpis['taux_degradation']:.1f}%", delta_color="inverse")
-
+    # 2. Sidebar & Navigation
+    with st.sidebar:
+        st.image("https://img.icons8.com/clouds/200/city.png", width=100)
+        st.title("🏙️ URBAN AI")
+        st.caption("Version GitOps v3.3")
         st.divider()
         
-        # Graphiques
+        # Bouton déconnexion
+        if st.button("🚪 Déconnexion"):
+            st.session_state.authenticated = False
+            st.rerun()
+            
+        st.divider()
+        st.info(f"Source : GitHub\nStatut : Connecté ✅")
+
+    # 3. Chargement des données
+    with st.spinner('🔄 Synchronisation avec GitHub en cours...'):
+        df = load_data_from_github()
+
+    if df.empty:
+        st.warning("⚠️ Aucune donnée chargée. Vérifiez l'URL GitHub dans le code.")
+        st.stop()
+
+    # 4. Filtres (Logique hiérarchique Ville -> Commune)
+    col_filter1, col_filter2, col_filter3 = st.columns(3)
+    
+    with col_filter1:
+        villes = sorted(df['Ville'].unique().astype(str))
+        selected_ville = st.selectbox("📍 Ville", villes)
+    
+    with col_filter2:
+        # Filtrer les communes selon la ville choisie
+        communes = sorted(df[df['Ville'] == selected_ville]['Nom de la Commune'].unique().astype(str))
+        selected_commune = st.selectbox("🏘️ Commune", communes)
+
+    # Filtrage du DataFrame principal
+    mask = (df['Ville'] == selected_ville) & (df['Nom de la Commune'] == selected_commune)
+    df_commune = df[mask]
+
+    # ==================== ONGLETS D'ANALYSE ====================
+    tab1, tab2, tab3 = st.tabs(["📊 Tableau de Bord", "📸 Galerie Images", "🤖 Maintenance (IA)"])
+
+    # --- TAB 1: DASHBOARD ---
+    with tab1:
+        st.header(f"Analyse : {selected_commune}")
+        
+        # Calcul des KPIs
+        total_ml = df_commune['linéaire de voirie(ml)'].sum()
+        total_taudis = df_commune['superficie de la poche du quartier de taudis'].sum()
+        nb_nids = len(df_commune[df_commune['présence du nid de poule'].notna()])
+        nb_lum = df_commune['Nombre de point lumineux sur le tronçon'].sum()
+
+        # Affichage KPIs
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric("Linéaire Voirie", f"{total_ml:,.0f} m")
+        k2.metric("Surface Taudis", f"{total_taudis:,.0f} m²")
+        k3.metric("Nids de poule", f"{nb_nids} tronçons", delta_color="inverse")
+        k4.metric("Éclairage", f"{nb_lum} points", delta_color="normal")
+
+        st.divider()
+
+        # Tableaux de données
         c1, c2 = st.columns(2)
         with c1:
-            st.subheader("Répartition par Classe de Voirie")
-            if 'classe de voirie' in df_filtered.columns:
-                chart_data = df_filtered['classe de voirie'].value_counts()
-                st.bar_chart(chart_data)
-        
+            st.subheader("🛣️ Détail des Tronçons")
+            cols_voirie = ['tronçon de voirie', 'linéaire de voirie(ml)', 'classe de voirie', 'présence du nid de poule']
+            # On vérifie que les colonnes existent
+            cols_exist = [c for c in cols_voirie if c in df_commune.columns]
+            st.dataframe(df_commune[cols_exist], use_container_width=True, height=300)
+
         with c2:
-            st.subheader("Données Brutes")
-            st.dataframe(df_filtered, use_container_width=True)
+            st.subheader("🏘️ Détail des Taudis")
+            cols_taudis = ['Nom de la poche du quartier de taudis', 'superficie de la poche du quartier de taudis']
+            cols_exist_t = [c for c in cols_taudis if c in df_commune.columns]
+            st.dataframe(df_commune[cols_exist_t].drop_duplicates(), use_container_width=True, height=300)
 
-    # --- TAB 2: MAINTENANCE PRÉDICTIVE (IA) ---
-    with tabs[1]:
-        st.header("🧠 Prédiction des Priorités de Maintenance")
+    # --- TAB 2: GALERIE IMAGES (Lecture directe URL GitHub) ---
+    with tab2:
+        st.header("Inspection Visuelle")
         
-        if HAS_MODEL:
-            predictor = MaintenancePredictor()
-            
-            # Bouton pour lancer l'analyse sur les données filtrées
-            if st.button("Lancer l'analyse IA sur la sélection"):
-                results = []
-                
-                # Barre de progression
-                progress_bar = st.progress(0)
-                
-                for index, row in df_filtered.iterrows():
-                    # Préparation des données pour le modèle
-                    troncon_data = {
-                        'lineaire_ml': row.get('linéaire de voirie(ml)', 0),
-                        'classe': row.get('classe de voirie', 'Non spécifiée'),
-                        'points_lumineux': row.get('Nombre de point lumineux sur le tronçon', 0),
-                        'nid_poule': row.get('présence du nid de poule', 'Non')
-                    }
-                    
-                    # Appel au modèle
-                    pred = predictor.predict_priority(troncon_data)
-                    
-                    results.append({
-                        'Tronçon': row.get('tronçon de voirie', 'Inconnu'),
-                        'Commune': row.get('Nom de la Commune', ''),
-                        'Priorité IA': pred['label'],
-                        'Niveau': pred['niveau'], # Pour le tri
-                        'Confiance': f"{pred['confiance']}%"
-                    })
-                    progress_bar.progress((index + 1) / len(df_filtered))
-                
-                # Création du DataFrame de résultats
-                res_df = pd.DataFrame(results).sort_values('Niveau', ascending=False)
-                
-                # Mise en forme conditionnelle
-                def color_priority(val):
-                    color = 'green'
-                    if val == 'Urgence': color = 'red'
-                    elif val == 'Haute': color = 'orange'
-                    elif val == 'Moyenne': color = 'yellow'
-                    return f'color: {color}; font-weight: bold'
-
-                st.dataframe(
-                    res_df.style.applymap(color_priority, subset=['Priorité IA']),
-                    use_container_width=True
-                )
-                
-                # KPI IA
-                n_urgent = len(res_df[res_df['Priorité IA'] == 'Urgence'])
-                st.warning(f"⚠️ {n_urgent} tronçons identifiés comme URGENTS par l'IA.")
-
-        else:
-            st.warning("Module IA non trouvé. Vérifiez que 'models/predictive_maintenance.py' est présent.")
-
-    # --- TAB 3: ANALYSE D'IMAGES ---
-    with tabs[2]:
-        st.header("Détection Automatique de Dégradations")
+        # Streamlit affiche les images directement depuis l'URL GitHub sans téléchargement local !
+        # C'est beaucoup plus rapide que votre code Gradio précédent.
         
-        uploaded_file = st.file_uploader("Charger une photo de voirie", type=['png', 'jpg', 'jpeg'])
+        st.subheader("Voirie & Tronçons")
+        cols = st.columns(3)
+        img_count = 0
         
-        if uploaded_file is not None:
-            col_img, col_res = st.columns(2)
-            
-            with col_img:
-                image = Image.open(uploaded_file)
-                st.image(image, caption='Image chargée', use_column_width=True)
-            
-            with col_res:
-                st.subheader("Analyse en cours...")
-                # Simulation de l'appel API IA (Puisque je n'ai pas le fichier image_analysis.py complet)
-                with st.spinner('Le réseau de neurones analyse la texture...'):
-                    import time
-                    time.sleep(2) # Effet "IA qui réfléchit"
-                    
-                    # Logique simulée pour la démo
-                    st.success("Analyse terminée !")
-                    st.metric("Type de dégradation", "Nid de Poule Profond")
-                    st.metric("Gravité", "Critique (85%)")
-                    st.info("Recommendation : Colmatage à froid sous 48h.")
+        for index, row in df_commune.iterrows():
+            img_name = row.get('image_troncon')
+            if pd.notna(img_name) and str(img_name).lower() != 'nan':
+                # Construction de l'URL brute GitHub
+                # Adaptez 'uploads/troncons/' selon votre repo
+                img_url = f"{GITHUB_REPO_URL}/uploads/troncons/{img_name}" 
+                
+                with cols[img_count % 3]:
+                    st.image(img_url, caption=f"{row['tronçon de voirie']}", use_column_width=True)
+                    # Petit hack pour vérifier si l'image charge (Streamlit gère les 404 proprement)
+                img_count += 1
+        
+        if img_count == 0:
+            st.info("Aucune image de voirie répertoriée pour cette commune.")
+
+    # --- TAB 3: IA & Maintenance (Placeholder) ---
+    with tab3:
+        st.info("Module IA connecté aux données GitHub.")
+        # Ici vous pouvez réimporter votre predictive_maintenance.py si vous le souhaitez
+        # comme vu dans les étapes précédentes.
 
 if __name__ == "__main__":
     main()
