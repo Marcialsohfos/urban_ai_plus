@@ -1,5 +1,5 @@
 """
-🏙️ URBAN AI - Version Finale (Streamlit + GitHub)
+🏙️ URBAN AI - Version Finale Corrigée (Streamlit + GitHub)
 Power by Lab_Math and CIE - Copyright © 2025
 """
 
@@ -8,22 +8,18 @@ import pandas as pd
 import requests
 import folium
 from streamlit_folium import st_folium
-from folium.plugins import HeatMap
 import hashlib
 import io
 import random
-import os
 
 # ==================== 1. CONFIGURATION DU PROJET ====================
-# MODIFIEZ CES 3 LIGNES AVEC VOS INFOS EXACTES GITHUB
-GITHUB_USER = "Marcialsohfos"       # User name
-GITHUB_REPO = "urban_ai_plus"  # repositorie
-GITHUB_BRANCH = "main"              # branch
+# Vérifiez scrupuleusement ces informations
+GITHUB_USER = "Marcialsohfos"       
+GITHUB_REPO = "urban_ai_plus"       
+GITHUB_BRANCH = "main"              
 
-# Construction des URLs brutes (RAW)
+# Construction de la racine URL
 BASE_URL = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/{GITHUB_BRANCH}"
-EXCEL_URL = f"{BASE_URL}/data/indicateurs_urbains.xlsx"
-IMAGES_URL = f"{BASE_URL}/data/uploads"
 
 # Mot de passe hashé (urbankit@1001a)
 MASTER_PASSWORD_HASH = hashlib.sha256("urbankit@1001a".encode()).hexdigest()
@@ -57,7 +53,6 @@ def check_password():
         return False
     return True
 
-# Coordonnées approximatives des communes pour la simulation GPS
 COMMUNE_COORDS = {
     'Yaounde 1': {'lat': 3.8850, 'lon': 11.5200}, 'Yaounde 2': {'lat': 3.8980, 'lon': 11.5000},
     'Yaounde 3': {'lat': 3.8400, 'lon': 11.5000}, 'Yaounde 4': {'lat': 3.8450, 'lon': 11.5500},
@@ -70,9 +65,7 @@ COMMUNE_COORDS = {
 def add_simulated_gps(row):
     """Ajoute des coordonnées GPS si elles manquent"""
     commune = str(row.get('Nom de la Commune', '')).strip().title()
-    # Par défaut Yaoundé Centre si commune inconnue
     base = COMMUNE_COORDS.get(commune, {'lat': 3.86, 'lon': 11.52})
-    # Ajout de "bruit" pour disperser les points
     return pd.Series({
         'latitude': base['lat'] + random.uniform(-0.02, 0.02),
         'longitude': base['lon'] + random.uniform(-0.02, 0.02)
@@ -80,32 +73,54 @@ def add_simulated_gps(row):
 
 @st.cache_data(ttl=3600)
 def load_data():
-    """Télécharge l'Excel depuis GitHub"""
+    """Télécharge l'Excel depuis GitHub avec gestion d'erreur intelligente"""
+    
+    # 1. Essai avec le dossier /data/
+    url_v1 = f"{BASE_URL}/data/indicateurs_urbains.xlsx"
+    # 2. Essai à la racine (au cas où l'utilisateur n'a pas mis de dossier data)
+    url_v2 = f"{BASE_URL}/indicateurs_urbains.xlsx"
+
     try:
-        response = requests.get(EXCEL_URL, timeout=10)
+        # Tentative 1
+        response = requests.get(url_v1, timeout=10)
+        
+        # Si échec (404), on tente le chemin racine
+        if response.status_code == 404:
+            # st.warning(f"Fichier non trouvé dans /data/, tentative à la racine...") # Décommenter pour debug
+            response = requests.get(url_v2, timeout=10)
+        
         response.raise_for_status()
+        
         with io.BytesIO(response.content) as f:
             df = pd.read_excel(f)
         
-        df.columns = df.columns.str.strip() # Nettoyage en-têtes
+        df.columns = df.columns.str.strip()
         
-        # Génération GPS si manquant
         if 'latitude' not in df.columns:
             gps_data = df.apply(add_simulated_gps, axis=1)
             df = pd.concat([df, gps_data], axis=1)
             
         return df
+        
     except Exception as e:
-        st.error(f"Erreur chargement données: {e}")
+        st.error(f"❌ ERREUR CRITIQUE DE CHARGEMENT")
+        st.write(f"Le système a tenté de lire : `{url_v1}`")
+        st.write(f"Erreur technique : {e}")
+        st.info("💡 CONSEIL : Vérifiez que votre dépôt GitHub est PUBLIC et que le fichier 'indicateurs_urbains.xlsx' existe bien.")
         return pd.DataFrame()
 
 def get_img_url_github(filename, folder):
     """Génère le lien direct vers l'image GitHub"""
     if pd.isna(filename) or str(filename).strip() == "":
         return None
-    # Nettoyage et encodage des espaces (Douala 1.jpg -> Douala%201.jpg)
+    
     clean_name = str(filename).strip().replace(" ", "%20")
-    return f"{IMAGES_URL}/{folder}/{clean_name}"
+    
+    # URL V1: Dans le dossier data/uploads
+    url = f"{BASE_URL}/data/uploads/{folder}/{clean_name}"
+    
+    # Vous pouvez ajouter ici une logique de vérification si nécessaire
+    return url
 
 # ==================== 3. APPLICATION PRINCIPALE ====================
 
@@ -113,21 +128,18 @@ def main():
     if not check_password():
         return
 
-    # --- SIDEBAR ---
     with st.sidebar:
         st.title("🏙️ URBAN AI")
-        st.success("Statut : Connecté (GitHub)")
-        st.markdown("---")
+        st.success("Statut : Connecté")
         if st.button("Déconnexion"):
             st.session_state.authenticated = False
             st.rerun()
 
     # --- CHARGEMENT ---
-    with st.spinner(f"Récupération des données depuis {GITHUB_REPO}..."):
+    with st.spinner(f"Synchronisation avec {GITHUB_REPO}..."):
         df = load_data()
 
     if df.empty:
-        st.warning("Impossible de lire le fichier Excel. Vérifiez l'URL GitHub.")
         st.stop()
 
     # --- FILTRES ---
@@ -139,10 +151,8 @@ def main():
         communes = sorted(df[df['Ville'] == ville_sel]['Nom de la Commune'].astype(str).unique())
         commune_sel = st.selectbox("Commune", communes)
 
-    # Filtrage
     df_c = df[(df['Ville'] == ville_sel) & (df['Nom de la Commune'] == commune_sel)]
 
-    # --- TABS ---
     tab1, tab2, tab3 = st.tabs(["📊 Tableau de Bord", "📸 Galerie Images", "🗺️ Carte Interactive"])
 
     # --- TAB 1: DASHBOARD ---
@@ -156,37 +166,37 @@ def main():
         nb_nids = len(df_c[df_c['présence du nid de poule'].notna()])
         k4.metric("Zones Dégradées", nb_nids, delta_color="inverse")
         
+        # Correction warning: use_container_width au lieu de use_column_width
         st.dataframe(df_c, use_container_width=True)
 
-    # --- TAB 2: IMAGES (GITHUB) ---
+    # --- TAB 2: IMAGES ---
     with tab2:
         st.header("Inspection Visuelle")
-        
         c1, c2 = st.columns(2)
+        
         with c1:
             st.subheader("🛣️ Voirie")
             for _, row in df_c.iterrows():
                 url = get_img_url_github(row.get('image_troncon'), "troncons")
                 if url:
-                    st.image(url, caption=row.get('tronçon de voirie'), use_column_width=True)
+                    # Correction warning
+                    st.image(url, caption=row.get('tronçon de voirie'), use_container_width=True)
         
         with c2:
             st.subheader("🏘️ Taudis")
             for _, row in df_c.iterrows():
                 url = get_img_url_github(row.get('image_taudis'), "taudis")
                 if url:
-                    st.image(url, caption=row.get('Nom de la poche du quartier de taudis'), use_column_width=True)
+                    # Correction warning
+                    st.image(url, caption=row.get('Nom de la poche du quartier de taudis'), use_container_width=True)
 
-    # --- TAB 3: CARTE (FOLIUM) ---
+    # --- TAB 3: CARTE ---
     with tab3:
         st.header("Cartographie des Risques")
-        
         if 'latitude' in df_c.columns:
-            # Centre de la carte
             center = [df_c['latitude'].mean(), df_c['longitude'].mean()]
             m = folium.Map(location=center, zoom_start=13)
             
-            # Marqueurs
             for _, row in df_c.iterrows():
                 color = 'red' if row.get('présence du nid de poule') == 'Oui' else 'green'
                 folium.Marker(
@@ -195,7 +205,6 @@ def main():
                     icon=folium.Icon(color=color)
                 ).add_to(m)
             
-            # Affichage
             st_folium(m, width=None, height=500)
         else:
             st.warning("Coordonnées GPS indisponibles.")
