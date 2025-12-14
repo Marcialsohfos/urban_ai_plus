@@ -19,7 +19,8 @@ GITHUB_REPO = "urban_ai_plus"
 GITHUB_BRANCH = "main"              
 
 # Construction de la racine URL
-BASE_URL = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/{GITHUB_BRANCH}"
+#BASE_URL = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/{GITHUB_BRANCH}"
+BASE_URL = f"https://raw.githubusercontent.com/https://github.com/Marcialsohfos/urban_ai_plus/blob/main/data/uploads/indicateurs_urbains.xlsx
 
 # Mot de passe hashé (urbankit@1001a)
 MASTER_PASSWORD_HASH = hashlib.sha256("urbankit@1001a".encode()).hexdigest()
