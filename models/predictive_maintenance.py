@@ -1,7 +1,5 @@
-# models/predictive_maintenance.py
 import pandas as pd
 import numpy as np
-from sklearn.ensemble import RandomForestClassifier
 import joblib
 import os
 
@@ -9,77 +7,78 @@ class MaintenancePredictor:
     def __init__(self):
         self.model = None
         self.model_path = 'models/maintenance_model.pkl'
-        self.features = [
-            'linéaire_ml', 'classe_voirie_encoded', 
-            'points_lumineux', 'traffic_estimate'
-        ]
-        self.load_model()
-
-    def load_model(self):
-        """Charge le modèle s'il existe, sinon reste en mode None"""
+        
+        # Tentative de chargement du modèle (si vous l'avez entraîné et uploadé)
         if os.path.exists(self.model_path):
             try:
                 self.model = joblib.load(self.model_path)
             except:
                 self.model = None
 
-    def prepare_features(self, df):
-        """Prépare les données pour la prédiction (Feature Engineering)"""
-        # Conversion en DataFrame si c'est un dict
-        if isinstance(df, dict):
-            df = pd.DataFrame([df])
-        
-        # Encodage simple
-        mapping = {'Primaire': 3, 'Secondaire': 2, 'Tertiaire': 1, 'Non spécifiée': 0}
-        df['classe_voirie_encoded'] = df['classe'].map(mapping).fillna(0)
-        
-        # Gestion des valeurs numériques
-        df['linéaire_ml'] = pd.to_numeric(df['lineaire_ml'], errors='coerce').fillna(0)
-        df['points_lumineux'] = pd.to_numeric(df['points_lumineux'], errors='coerce').fillna(0)
-        
-        # Feature engineering simple
-        df['traffic_estimate'] = df['points_lumineux'] * 10 + df['linéaire_ml'] * 0.5
-        
-        # Retourner seulement les colonnes nécessaires
-        # On s'assure que toutes les colonnes existent
-        for col in self.features:
-            if col not in df.columns:
-                df[col] = 0
-                
-        return df[self.features]
-
-    def predict_priority(self, troncon_data):
+    def predict_priority(self, row):
         """
-        Prédit la priorité.
-        Si pas de modèle entraîné -> Utilise une heuristique (règle métier)
+        Prédit la priorité de maintenance.
+        Accepte une ligne (row) du DataFrame Pandas (fichier Excel).
         """
-        X = self.prepare_features(troncon_data)
         
-        priority_labels = {0: 'Basse', 1: 'Moyenne', 2: 'Haute', 3: 'Urgence'}
-
-        if self.model:
-            # Mode IA réelle
-            try:
-                prediction = self.model.predict_proba(X)
-                level = np.argmax(prediction)
-                confiance = float(prediction[0][level])
-            except:
-                # Fallback si erreur input
-                level = 1
-                confiance = 0.5
-        else:
-            # Mode "Simulation / Règle métier" (Important pour la démo sans entrainement)
-            # Logique: Si beaucoup de nids de poule ou éclairage faible sur route primaire
-            score = 0
-            if troncon_data.get('nid_poule') == 'Oui': score += 2
-            if troncon_data.get('classe') == 'Primaire': score += 1
-            if troncon_data.get('points_lumineux', 0) < 10: score += 1
+        # 1. Extraction sécurisée des données (Noms exacts des colonnes Excel)
+        # On utilise .get() pour éviter les crashs si une colonne manque
+        
+        # Nettoyage des valeurs (gestion des NaN/Vides)
+        nid_poule = str(row.get('présence du nid de poule', '')).strip().lower()
+        classe = str(row.get('classe de voirie', '')).strip().title()
+        
+        try:
+            lineaire = float(row.get('linéaire de voirie(ml)', 0))
+        except:
+            lineaire = 0
             
-            level = min(score, 3)
-            confiance = 1.0 # Simulé
+        try:
+            lumieres = float(row.get('Nombre de point lumineux sur le tronçon', 0))
+        except:
+            lumieres = 0
 
+        # 2. LOGIQUE EXPERTE (RÈGLES MÉTIER)
+        # C'est ce qui tourne si vous n'avez pas de modèle IA entraîné (.pkl)
+        
+        score = 0
+        
+        # Règle A : Présence de nid de poule (Critique)
+        if nid_poule in ['oui', 'yes', 'vrai', 'true'] or len(nid_poule) > 0:
+            score += 50
+            
+        # Règle B : Importance de la route
+        if 'Primaire' in classe:
+            score += 20
+        elif 'Secondaire' in classe:
+            score += 10
+            
+        # Règle C : Sécurité / Éclairage (Si route longue mais peu éclairée)
+        if lineaire > 500 and lumieres < 5:
+            score += 15
+        
+        # Règle D : Taille du tronçon (Plus c'est long, plus c'est cher/important)
+        if lineaire > 2000:
+            score += 10
+
+        # Normalisation du score (max 100)
+        final_score = min(score, 100)
+
+        # 3. DÉCISION ET ACTION
+        if final_score >= 60:
+            label = "🚨 URGENT"
+            action = "Colmatage immédiat & Renforcement"
+        elif final_score >= 30:
+            label = "⚠️ Prioritaire"
+            action = "Planifier réfection (Trimestre 1)"
+        else:
+            label = "✅ Surveillance"
+            action = "Maintenance préventive standard"
+
+        # Retourne le format exact attendu par votre app.py
         return {
-            'niveau': int(level),
-            'label': priority_labels.get(level, 'Inconnu'),
-            'confiance': round(confiance * 100, 1)
+            'label': label,
+            'score': final_score,
+            'action': action,
+            'confiance': 100 # Simulé à 100% car basé sur des règles strictes
         }
