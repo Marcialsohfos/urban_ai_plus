@@ -1,5 +1,5 @@
 """
-🏙️ URBAN AI - Version Finale Corrigée (Streamlit + GitHub)
+🏙️ URBAN AI - Version Finale Corrigée (Chemin Uploads)
 Power by Lab_Math and CIE - Copyright © 2025
 """
 
@@ -17,8 +17,7 @@ GITHUB_USER = "Marcialsohfos"
 GITHUB_REPO = "urban_ai_plus"
 GITHUB_BRANCH = "main"
 
-# CORRECTION ICI : On construit l'URL racine proprement
-# Cette URL pointe vers le dossier racine du projet sur GitHub en mode "Raw"
+# URL de base (Racine du dépôt en mode RAW)
 BASE_URL = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/{GITHUB_BRANCH}"
 
 # Mot de passe hashé (urbankit@1001a)
@@ -53,7 +52,7 @@ def check_password():
         return False
     return True
 
-# Coordonnées approximatives pour simulation si GPS manquant
+# Coordonnées pour simulation GPS
 COMMUNE_COORDS = {
     'Yaounde 1': {'lat': 3.8850, 'lon': 11.5200}, 'Yaounde 2': {'lat': 3.8980, 'lon': 11.5000},
     'Yaounde 3': {'lat': 3.8400, 'lon': 11.5000}, 'Yaounde 4': {'lat': 3.8450, 'lon': 11.5500},
@@ -64,7 +63,6 @@ COMMUNE_COORDS = {
 }
 
 def add_simulated_gps(row):
-    """Ajoute des coordonnées GPS simulées si elles manquent"""
     commune = str(row.get('Nom de la Commune', '')).strip().title()
     base = COMMUNE_COORDS.get(commune, {'lat': 3.86, 'lon': 11.52})
     return pd.Series({
@@ -76,26 +74,19 @@ def add_simulated_gps(row):
 def load_data():
     """Télécharge l'Excel depuis GitHub"""
     
-    # On construit l'URL du fichier Excel ici
-    url_v1 = f"{BASE_URL}/data/indicateurs_urbains.xlsx"
-    url_v2 = f"{BASE_URL}/indicateurs_urbains.xlsx" # Secours
+    # --- CORRECTION DU CHEMIN ICI ---
+    # On pointe vers /data/uploads/indicateurs_urbains.xlsx
+    url = f"{BASE_URL}/data/uploads/indicateurs_urbains.xlsx"
 
     try:
-        # Essai 1 : Dans le dossier /data/
-        response = requests.get(url_v1, timeout=10)
-        
-        # Essai 2 : A la racine (si 404)
-        if response.status_code == 404:
-            response = requests.get(url_v2, timeout=10)
-        
-        response.raise_for_status()
+        response = requests.get(url, timeout=10)
+        response.raise_for_status() # Vérifie si 404
         
         with io.BytesIO(response.content) as f:
             df = pd.read_excel(f)
         
         df.columns = df.columns.str.strip()
         
-        # Ajout GPS si nécessaire
         if 'latitude' not in df.columns:
             gps_data = df.apply(add_simulated_gps, axis=1)
             df = pd.concat([df, gps_data], axis=1)
@@ -104,7 +95,7 @@ def load_data():
         
     except Exception as e:
         st.error(f"❌ ERREUR DE CHARGEMENT")
-        st.write(f"URL tentée : `{url_v1}`")
+        st.write(f"URL tentée : `{url}`")
         st.write(f"Détail : {e}")
         return pd.DataFrame()
 
@@ -115,7 +106,7 @@ def get_img_url_github(filename, folder):
     
     clean_name = str(filename).strip().replace(" ", "%20")
     
-    # Construction de l'URL image basée sur BASE_URL
+    # Les images sont aussi dans data/uploads/
     return f"{BASE_URL}/data/uploads/{folder}/{clean_name}"
 
 # ==================== 3. APPLICATION PRINCIPALE ====================
@@ -131,8 +122,7 @@ def main():
             st.session_state.authenticated = False
             st.rerun()
 
-    # --- CHARGEMENT ---
-    with st.spinner(f"Synchronisation avec GitHub..."):
+    with st.spinner(f"Chargement depuis {GITHUB_REPO}/data/uploads..."):
         df = load_data()
 
     if df.empty:
@@ -149,6 +139,7 @@ def main():
 
     df_c = df[(df['Ville'] == ville_sel) & (df['Nom de la Commune'] == commune_sel)]
 
+    # --- TABS ---
     tab1, tab2, tab3 = st.tabs(["📊 Tableau de Bord", "📸 Galerie Images", "🗺️ Carte Interactive"])
 
     # --- TAB 1: DASHBOARD ---
