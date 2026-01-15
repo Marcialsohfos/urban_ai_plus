@@ -25,7 +25,6 @@ MASTER_PASSWORD_HASH = hashlib.sha256("urbankit@1001a".encode()).hexdigest()
 st.set_page_config(page_title="URBAN AI | Cameroun", page_icon="🇨🇲", layout="wide")
 
 # ==================== 2. IMPORTATION DU MODÈLE IA ====================
-# On utilise un try/except pour ne pas faire planter l'appli si le dossier models n'est pas encore poussé
 try:
     from models.predictive_maintenance import MaintenancePredictor
     HAS_AI = True
@@ -67,14 +66,10 @@ def add_simulated_gps(row):
 
 @st.cache_data(ttl=3600)
 def load_data():
-    """
-    Charge les données depuis le fichier local s'il existe (cas du déploiement),
-    sinon tente de le télécharger depuis GitHub (cas du développement local sans data).
-    """
     local_path = "data/uploads/indicateurs_urbains.xlsx"
     df = pd.DataFrame()
 
-    # Tentative 1 : Lecture Locale (Recommandé pour Streamlit Cloud)
+    # Tentative 1 : Lecture Locale (Prioritaire pour la stabilité)
     if os.path.exists(local_path):
         try:
             df = pd.read_excel(local_path)
@@ -89,12 +84,10 @@ def load_data():
             response.raise_for_status()
             with io.BytesIO(response.content) as f:
                 df = pd.read_excel(f)
-        except Exception as e:
-            # Si on est ici, ni le local ni le distant n'ont marché
-            st.error("Impossible de charger les données. Vérifiez que le fichier 'indicateurs_urbains.xlsx' est bien dans 'data/uploads/' sur GitHub.")
+        except Exception:
+            st.error("Impossible de charger les données.")
             return pd.DataFrame()
 
-    # Nettoyage et ajout GPS
     df.columns = df.columns.str.strip()
     if 'latitude' not in df.columns:
         gps_data = df.apply(add_simulated_gps, axis=1)
@@ -117,7 +110,7 @@ def main():
         if HAS_AI:
             st.info("🧠 Module IA : Actif")
         else:
-            st.warning("🧠 Module IA : Non détecté (Vérifiez le dossier models/)")
+            st.warning("IA : Non détectée")
         
         if st.button("Déconnexion"):
             st.session_state.authenticated = False
@@ -149,7 +142,8 @@ def main():
         nb_nids = len(df_c[df_c['présence du nid de poule'].notna()])
         k3.metric("Zones Dégradées", nb_nids, delta_color="inverse")
         k4.metric("Taudis", f"{df_c['superficie de la poche du quartier de taudis'].sum():,.0f} m²")
-        st.dataframe(df_c, use_container_width=True)
+        # CORRECTION ICI : width="stretch" au lieu de use_container_width=True
+        st.dataframe(df_c, width="stretch")
 
     with tab2:
         st.header("Galerie")
@@ -158,12 +152,14 @@ def main():
             st.subheader("Voirie")
             for _, row in df_c.iterrows():
                 url = get_img_url_github(row.get('image_troncon'), "troncons")
-                if url: st.image(url, caption=row.get('tronçon de voirie'), use_container_width=True)
+                # CORRECTION ICI
+                if url: st.image(url, caption=row.get('tronçon de voirie'), width="stretch")
         with c2:
             st.subheader("Taudis")
             for _, row in df_c.iterrows():
                 url = get_img_url_github(row.get('image_taudis'), "taudis")
-                if url: st.image(url, caption=row.get('Nom de la poche du quartier de taudis'), use_container_width=True)
+                # CORRECTION ICI
+                if url: st.image(url, caption=row.get('Nom de la poche du quartier de taudis'), width="stretch")
 
     with tab3:
         st.header("Carte")
@@ -180,50 +176,38 @@ def main():
         st.header("🤖 Maintenance Prédictive & Recommandations")
         
         if not HAS_AI:
-            st.error("Le fichier 'models/predictive_maintenance.py' est introuvable ou contient des erreurs.")
-            st.info("Assurez-vous d'avoir un fichier vide '__init__.py' dans le dossier 'models'.")
+            st.error("Module IA introuvable.")
         else:
-            # Instanciation du modèle
             predictor = MaintenancePredictor()
+            st.markdown("Priorisation des interventions via IA.")
             
-            st.markdown("Ce module utilise l'IA pour prioriser les interventions en fonction de la dégradation, de l'éclairage et de l'importance de la voirie.")
-            
-            if st.button("🚀 Lancer l'analyse IA sur la commune"):
+            if st.button("🚀 Lancer l'analyse IA"):
                 results = []
-                
-                # Barre de progression
                 progress_bar = st.progress(0)
                 
                 for i, (index, row) in enumerate(df_c.iterrows()):
-                    # Appel au modèle pour chaque ligne
                     pred = predictor.predict_priority(row)
-                    
                     results.append({
                         "Tronçon": row.get('tronçon de voirie'),
                         "Priorité": pred['label'],
                         "Score Risque": pred['score'],
-                        "Action Recommandée": pred['action'],
-                        "État Actuel": "Dégradé" if row.get('présence du nid de poule') == 'Oui' else "Stable"
+                        "Action": pred['action'],
+                        "État": "Dégradé" if row.get('présence du nid de poule') == 'Oui' else "Stable"
                     })
                     progress_bar.progress((i + 1) / len(df_c))
                 
-                # Création du tableau de résultats
-                res_df = pd.DataFrame(results)
+                res_df = pd.DataFrame(results).sort_values(by="Score Risque", ascending=False)
                 
-                # Tri par score de risque
-                res_df = res_df.sort_values(by="Score Risque", ascending=False)
-                
-                # Affichage avec couleurs
                 def highlight_urgent(val):
                     color = 'red' if 'URGENT' in str(val) else 'black'
                     return f'color: {color}; font-weight: bold'
 
-                st.subheader("📋 Rapport de Priorisation")
-                st.dataframe(res_df.style.map(highlight_urgent, subset=['Priorité']), use_container_width=True)
+                st.subheader("📋 Rapport")
+                # CORRECTION ICI : width="stretch" + utilisation de .map()
+                st.dataframe(res_df.style.map(highlight_urgent, subset=['Priorité']), width="stretch")
                 
-                # Statistiques de l'analyse
                 n_urgent = len(res_df[res_df['Priorité'].str.contains('URGENT')])
-                st.warning(f"⚠️ {n_urgent} tronçons nécessitent une intervention immédiate dans cette commune.")
+                st.warning(f"⚠️ {n_urgent} tronçons urgents.")
 
 if __name__ == "__main__":
     main()
