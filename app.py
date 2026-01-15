@@ -19,12 +19,12 @@ GITHUB_REPO = "urban_ai_plus"
 GITHUB_BRANCH = "main"
 BASE_URL = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/{GITHUB_BRANCH}"
 
-# Mot de passe : urbankit@1001a
 MASTER_PASSWORD_HASH = hashlib.sha256("urbankit@1001a".encode()).hexdigest()
 
 st.set_page_config(page_title="URBAN AI | Cameroun", page_icon="🇨🇲", layout="wide")
 
 # ==================== 2. IMPORTATION DU MODÈLE IA ====================
+# On utilise un try/except pour ne pas faire planter l'appli si le dossier models n'est pas encore poussé
 try:
     from models.predictive_maintenance import MaintenancePredictor
     HAS_AI = True
@@ -66,34 +66,20 @@ def add_simulated_gps(row):
 
 @st.cache_data(ttl=3600)
 def load_data():
-    local_path = "data/uploads/indicateurs_urbains.xlsx"
-    df = pd.DataFrame()
-
-    # Tentative 1 : Lecture Locale (Prioritaire pour la stabilité)
-    if os.path.exists(local_path):
-        try:
-            df = pd.read_excel(local_path)
-        except Exception as e:
-            st.error(f"Erreur lecture fichier local : {e}")
-    
-    # Tentative 2 : Téléchargement GitHub (Fallback)
-    if df.empty:
-        url = f"{BASE_URL}/data/uploads/indicateurs_urbains.xlsx"
-        try:
-            response = requests.get(url, timeout=10)
-            response.raise_for_status()
-            with io.BytesIO(response.content) as f:
-                df = pd.read_excel(f)
-        except Exception:
-            st.error("Impossible de charger les données.")
-            return pd.DataFrame()
-
-    df.columns = df.columns.str.strip()
-    if 'latitude' not in df.columns:
-        gps_data = df.apply(add_simulated_gps, axis=1)
-        df = pd.concat([df, gps_data], axis=1)
-    
-    return df
+    url = f"{BASE_URL}/data/uploads/indicateurs_urbains.xlsx"
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        with io.BytesIO(response.content) as f:
+            df = pd.read_excel(f)
+        df.columns = df.columns.str.strip()
+        if 'latitude' not in df.columns:
+            gps_data = df.apply(add_simulated_gps, axis=1)
+            df = pd.concat([df, gps_data], axis=1)
+        return df
+    except Exception as e:
+        st.error("Erreur connexion GitHub. Vérifiez que le repo est Public.")
+        return pd.DataFrame()
 
 def get_img_url_github(filename, folder):
     if pd.isna(filename) or str(filename).strip() == "": return None
@@ -110,7 +96,7 @@ def main():
         if HAS_AI:
             st.info("🧠 Module IA : Actif")
         else:
-            st.warning("IA : Non détectée")
+            st.warning("🧠 Module IA : Non détecté (Vérifiez le dossier models/)")
         
         if st.button("Déconnexion"):
             st.session_state.authenticated = False
@@ -142,8 +128,7 @@ def main():
         nb_nids = len(df_c[df_c['présence du nid de poule'].notna()])
         k3.metric("Zones Dégradées", nb_nids, delta_color="inverse")
         k4.metric("Taudis", f"{df_c['superficie de la poche du quartier de taudis'].sum():,.0f} m²")
-        # CORRECTION ICI : width="stretch" au lieu de use_container_width=True
-        st.dataframe(df_c, width="stretch")
+        st.dataframe(df_c, use_container_width=True)
 
     with tab2:
         st.header("Galerie")
@@ -152,14 +137,12 @@ def main():
             st.subheader("Voirie")
             for _, row in df_c.iterrows():
                 url = get_img_url_github(row.get('image_troncon'), "troncons")
-                # CORRECTION ICI
-                if url: st.image(url, caption=row.get('tronçon de voirie'), width="stretch")
+                if url: st.image(url, caption=row.get('tronçon de voirie'), use_container_width=True)
         with c2:
             st.subheader("Taudis")
             for _, row in df_c.iterrows():
                 url = get_img_url_github(row.get('image_taudis'), "taudis")
-                # CORRECTION ICI
-                if url: st.image(url, caption=row.get('Nom de la poche du quartier de taudis'), width="stretch")
+                if url: st.image(url, caption=row.get('Nom de la poche du quartier de taudis'), use_container_width=True)
 
     with tab3:
         st.header("Carte")
@@ -176,38 +159,50 @@ def main():
         st.header("🤖 Maintenance Prédictive & Recommandations")
         
         if not HAS_AI:
-            st.error("Module IA introuvable.")
+            st.error("Le fichier 'models/predictive_maintenance.py' est introuvable sur GitHub.")
+            st.info("Veuillez pousser le dossier 'models' dans votre dépôt.")
         else:
+            # Instanciation du modèle
             predictor = MaintenancePredictor()
-            st.markdown("Priorisation des interventions via IA.")
             
-            if st.button("🚀 Lancer l'analyse IA"):
+            st.markdown("Ce module utilise l'IA pour prioriser les interventions en fonction de la dégradation, de l'éclairage et de l'importance de la voirie.")
+            
+            if st.button("🚀 Lancer l'analyse IA sur la commune"):
                 results = []
+                
+                # Barre de progression
                 progress_bar = st.progress(0)
                 
                 for i, (index, row) in enumerate(df_c.iterrows()):
+                    # Appel au modèle pour chaque ligne
                     pred = predictor.predict_priority(row)
+                    
                     results.append({
                         "Tronçon": row.get('tronçon de voirie'),
                         "Priorité": pred['label'],
                         "Score Risque": pred['score'],
-                        "Action": pred['action'],
-                        "État": "Dégradé" if row.get('présence du nid de poule') == 'Oui' else "Stable"
+                        "Action Recommandée": pred['action'],
+                        "État Actuel": "Dégradé" if row.get('présence du nid de poule') == 'Oui' else "Stable"
                     })
                     progress_bar.progress((i + 1) / len(df_c))
                 
-                res_df = pd.DataFrame(results).sort_values(by="Score Risque", ascending=False)
+                # Création du tableau de résultats
+                res_df = pd.DataFrame(results)
                 
+                # Tri par score de risque (du plus urgent au moins urgent)
+                res_df = res_df.sort_values(by="Score Risque", ascending=False)
+                
+                # Affichage avec couleurs
                 def highlight_urgent(val):
                     color = 'red' if 'URGENT' in str(val) else 'black'
                     return f'color: {color}; font-weight: bold'
 
-                st.subheader("📋 Rapport")
-                # CORRECTION ICI : width="stretch" + utilisation de .map()
-                st.dataframe(res_df.style.map(highlight_urgent, subset=['Priorité']), width="stretch")
+                st.subheader("📋 Rapport de Priorisation")
+                st.dataframe(res_df.style.applymap(highlight_urgent, subset=['Priorité']), use_container_width=True)
                 
+                # Statistiques de l'analyse
                 n_urgent = len(res_df[res_df['Priorité'].str.contains('URGENT')])
-                st.warning(f"⚠️ {n_urgent} tronçons urgents.")
+                st.warning(f"⚠️ {n_urgent} tronçons nécessitent une intervention immédiate dans cette commune.")
 
 if __name__ == "__main__":
     main()
