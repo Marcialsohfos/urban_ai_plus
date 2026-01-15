@@ -19,6 +19,7 @@ GITHUB_REPO = "urban_ai_plus"
 GITHUB_BRANCH = "main"
 BASE_URL = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/{GITHUB_BRANCH}"
 
+# Mot de passe : urbankit@1001a
 MASTER_PASSWORD_HASH = hashlib.sha256("urbankit@1001a".encode()).hexdigest()
 
 st.set_page_config(page_title="URBAN AI | Cameroun", page_icon="🇨🇲", layout="wide")
@@ -66,20 +67,40 @@ def add_simulated_gps(row):
 
 @st.cache_data(ttl=3600)
 def load_data():
-    url = f"{BASE_URL}/data/uploads/indicateurs_urbains.xlsx"
-    try:
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-        with io.BytesIO(response.content) as f:
-            df = pd.read_excel(f)
-        df.columns = df.columns.str.strip()
-        if 'latitude' not in df.columns:
-            gps_data = df.apply(add_simulated_gps, axis=1)
-            df = pd.concat([df, gps_data], axis=1)
-        return df
-    except Exception as e:
-        st.error("Erreur connexion GitHub. Vérifiez que le repo est Public.")
-        return pd.DataFrame()
+    """
+    Charge les données depuis le fichier local s'il existe (cas du déploiement),
+    sinon tente de le télécharger depuis GitHub (cas du développement local sans data).
+    """
+    local_path = "data/uploads/indicateurs_urbains.xlsx"
+    df = pd.DataFrame()
+
+    # Tentative 1 : Lecture Locale (Recommandé pour Streamlit Cloud)
+    if os.path.exists(local_path):
+        try:
+            df = pd.read_excel(local_path)
+        except Exception as e:
+            st.error(f"Erreur lecture fichier local : {e}")
+    
+    # Tentative 2 : Téléchargement GitHub (Fallback)
+    if df.empty:
+        url = f"{BASE_URL}/data/uploads/indicateurs_urbains.xlsx"
+        try:
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            with io.BytesIO(response.content) as f:
+                df = pd.read_excel(f)
+        except Exception as e:
+            # Si on est ici, ni le local ni le distant n'ont marché
+            st.error("Impossible de charger les données. Vérifiez que le fichier 'indicateurs_urbains.xlsx' est bien dans 'data/uploads/' sur GitHub.")
+            return pd.DataFrame()
+
+    # Nettoyage et ajout GPS
+    df.columns = df.columns.str.strip()
+    if 'latitude' not in df.columns:
+        gps_data = df.apply(add_simulated_gps, axis=1)
+        df = pd.concat([df, gps_data], axis=1)
+    
+    return df
 
 def get_img_url_github(filename, folder):
     if pd.isna(filename) or str(filename).strip() == "": return None
@@ -159,8 +180,8 @@ def main():
         st.header("🤖 Maintenance Prédictive & Recommandations")
         
         if not HAS_AI:
-            st.error("Le fichier 'models/predictive_maintenance.py' est introuvable sur GitHub.")
-            st.info("Veuillez pousser le dossier 'models' dans votre dépôt.")
+            st.error("Le fichier 'models/predictive_maintenance.py' est introuvable ou contient des erreurs.")
+            st.info("Assurez-vous d'avoir un fichier vide '__init__.py' dans le dossier 'models'.")
         else:
             # Instanciation du modèle
             predictor = MaintenancePredictor()
@@ -189,7 +210,7 @@ def main():
                 # Création du tableau de résultats
                 res_df = pd.DataFrame(results)
                 
-                # Tri par score de risque (du plus urgent au moins urgent)
+                # Tri par score de risque
                 res_df = res_df.sort_values(by="Score Risque", ascending=False)
                 
                 # Affichage avec couleurs
@@ -198,7 +219,7 @@ def main():
                     return f'color: {color}; font-weight: bold'
 
                 st.subheader("📋 Rapport de Priorisation")
-                st.dataframe(res_df.style.applymap(highlight_urgent, subset=['Priorité']), use_container_width=True)
+                st.dataframe(res_df.style.map(highlight_urgent, subset=['Priorité']), use_container_width=True)
                 
                 # Statistiques de l'analyse
                 n_urgent = len(res_df[res_df['Priorité'].str.contains('URGENT')])
